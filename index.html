@@ -555,8 +555,8 @@
 
   .ad-label{font-size:10px;letter-spacing:1.5px;text-transform:uppercase;color:var(--ink-dim);margin:0 0 6px;text-align:center;}
   .ad-carousel{
-    margin:0 0 16px;border-radius:12px;overflow:hidden;border:1px solid var(--line);
-    background:#062028;position:relative;min-height:88px;
+    margin:0 0 16px;border-radius:12px;overflow:hidden;border:1px solid var(--gold-soft);
+    background:#0a3038;position:relative;min-height:92px;
   }
   .ad-track{display:flex;transition:transform .45s ease;will-change:transform;}
   .ad-slide{min-width:100%;flex:0 0 100%;}
@@ -626,30 +626,61 @@
   }
   .cloud{
     position:absolute;
-    background:#fff;
-    opacity:0.22;
+    background:#ffffff;
+    opacity:0.35;
     border-radius:40px;
-    animation:drift linear infinite;
-    will-change:transform;
+    animation:cloudMove linear infinite;
   }
   .cloud:before,.cloud:after{
-    content:"";position:absolute;background:#fff;border-radius:50%;
+    content:"";position:absolute;background:#ffffff;border-radius:50%;
   }
   .cloud:before{width:60%;height:140%;top:-40%;left:10%;}
   .cloud:after{width:50%;height:120%;top:-30%;right:8%;}
-  .cloud.c1{width:160px;height:48px;top:10%;left:-5%;animation-duration:42s;}
-  .cloud.c2{width:120px;height:40px;top:24%;left:45%;animation-duration:55s;animation-delay:-15s;opacity:0.18;}
-  .cloud.c3{width:180px;height:52px;top:48%;left:8%;animation-duration:50s;animation-delay:-8s;opacity:0.2;}
-  .cloud.c4{width:100px;height:36px;top:68%;left:62%;animation-duration:60s;animation-delay:-25s;opacity:0.16;}
-  .cloud.c5{width:140px;height:44px;top:6%;left:72%;animation-duration:48s;animation-delay:-4s;opacity:0.2;}
-  @keyframes drift{
-    0%{transform:translate3d(0,0,0);}
-    50%{transform:translate3d(50px,-10px,0);}
-    100%{transform:translate3d(0,0,0);}
+  .cloud.c1{width:180px;height:52px;top:8%;animation-duration:28s;}
+  .cloud.c2{width:140px;height:44px;top:22%;animation-duration:36s;animation-delay:-8s;opacity:0.28;}
+  .cloud.c3{width:200px;height:56px;top:42%;animation-duration:32s;animation-delay:-14s;opacity:0.3;}
+  .cloud.c4{width:120px;height:40px;top:62%;animation-duration:40s;animation-delay:-20s;opacity:0.25;}
+  .cloud.c5{width:160px;height:48px;top:78%;animation-duration:34s;animation-delay:-6s;opacity:0.28;}
+  @keyframes cloudMove{
+    0%{transform:translate3d(-30vw,0,0);}
+    100%{transform:translate3d(110vw,0,0);}
   }
   .wrap{position:relative;z-index:1;}
   #adSlot{position:relative;z-index:2;}
   .ad-carousel{box-shadow:0 8px 24px rgba(0,0,0,0.25);}
+
+  .lobby-hero{
+    text-align:center;padding:8px 0 18px;
+  }
+  .lobby-hero .hero-title{
+    font-family:"Cormorant Garamond",Georgia,serif;font-size:clamp(22px,5vw,32px);
+    margin:0 0 8px;color:var(--ink);font-weight:600;
+  }
+  .lobby-hero .hero-sub{
+    font-size:clamp(12px,2.8vw,14px);color:var(--ink-dim);margin:0 0 16px;line-height:1.55;
+  }
+  .lobby-cta{
+    display:flex;flex-wrap:wrap;gap:10px;justify-content:center;margin:0 0 8px;
+  }
+  .lobby-cta .btn-primary,.lobby-cta .btn-secondary{
+    min-width:140px;padding:12px 18px;font-size:14px;border-radius:10px;
+  }
+  .ad-fallback{
+    display:flex !important;min-height:80px !important;align-items:center;justify-content:center;
+    padding:16px !important;color:#e6fffb !important;font-size:clamp(14px,3.5vw,17px) !important;
+    background:linear-gradient(135deg,#14b8a6,#0f766e) !important;text-align:center;font-weight:600 !important;
+  }
+  @media(max-width:480px){
+    .entry-thumb{width:48px;height:48px;}
+    .entry-name{font-size:17px;}
+    .link-btn{padding:12px 14px;font-size:14px;}
+    .top-nav button{padding:11px 8px;font-size:12px;min-width:70px;}
+    .brand img{width:40px;height:40px;}
+  }
+  @media(min-width:900px){
+    .wrap{max-width:720px;}
+    .entry-thumb{width:64px;height:64px;}
+  }
 </style>
 </head>
 <body>
@@ -711,6 +742,13 @@
       <div class="ad-carousel" id="adCarousel">
         <div class="ad-track" id="adTrack"></div>
         <div class="ad-dots" id="adDots"></div>
+      </div>
+    </div>
+    <div class="lobby-hero">
+      <p class="hero-title">Lobby Download</p>
+      <p class="hero-sub">Pilih game, unduh lewat link cadangan, atau buka Report jika link bermasalah.</p>
+      <div class="lobby-cta">
+        <button type="button" class="btn-primary" id="ctaFiles">Download Game</button>
       </div>
     </div>
     <div class="lobby-top">
@@ -947,7 +985,7 @@
     <div class="fline"></div>
     <p>Dirawat dengan teliti oleh <b>SantuyTL Team</b></p>
     <p class="footer-credit" id="footerCredit">Dirawat oleh SantuyTL Team Development.</p>
-    <p style="font-size:10px;margin-top:8px;opacity:0.5;">v7.8 · awan putih</p>
+    <p style="font-size:10px;margin-top:8px;opacity:0.5;">v8.1 · lobby</p>
   </footer>
 </div>
 
@@ -981,7 +1019,11 @@ var FIREBASE_CONFIG = {
 var entries = [];
 var logs = [];
 var isAdmin = false;
-var settings = { credit: "Dirawat oleh SantuyTL Team Development.", rules: "", youtube: "", discord: "", ads: [] };
+var DEFAULT_ADS = [
+  { img: "", link: "https://discord.gg/tqDSET8AsV", text: "Join Discord SantuyTL Team", type: "text" },
+  { img: "", link: "https://www.youtube.com/@TeknologiSantuy", text: "Subscribe YouTube Teknologi Santuy", type: "text" }
+];
+var settings = { credit: "Dirawat oleh SantuyTL Team Development.", rules: "", youtube: "", discord: "", ads: DEFAULT_ADS.slice() };
 var adSlideIndex = 0;
 var adTimer = null;
 var commentsByEntry = {};
@@ -1147,6 +1189,12 @@ function persistAdsOnly(){
 
 function bindCloudListeners(){
   if(!cloudReady || !db) return;
+  db.ref(ROOT + "/ads").on("value", function(snap){
+    var loaded = coerceAdsList(snap.val());
+    if(loaded.length) settings.ads = loaded;
+    normalizeAds();
+    renderAdCarousel();
+  });
   db.ref(ROOT).on("value", function(snap){
     var val = snap.val() || {};
     entries = mapToArray(val.entries);
@@ -1159,18 +1207,16 @@ function bindCloudListeners(){
         discord: val.settings.discord || "",
         ads: settings.ads || []
       };
-      // ads stored separately so public settings save cannot wipe them
-      if(val.ads != null){
-        settings.ads = coerceAdsList(val.ads);
-      } else if(val.settings && val.settings.ads){
-        settings.ads = coerceAdsList(val.settings.ads);
-      }
-      if(!settings.ads.length && val.settings && val.settings.adImg){
-        settings.ads = [{ img: val.settings.adImg || "", link: val.settings.adLink || "", text: val.settings.adText || "" }];
-      }
-      normalizeAds();
-      commentsByEntry = val.comments || {};
     }
+    // ALWAYS load ads (separate path) — jangan tergantung settings
+    if(val.ads != null){
+      var loaded = coerceAdsList(val.ads);
+      if(loaded.length) settings.ads = loaded;
+    } else if(val.settings && val.settings.ads){
+      var loaded2 = coerceAdsList(val.settings.ads);
+      if(loaded2.length) settings.ads = loaded2;
+    }
+    normalizeAds();
     if(typeof val.visits === "number") visitCount = val.visits;
     if(val.comments) commentsByEntry = val.comments;
     else if(!val.comments) commentsByEntry = commentsByEntry || {};
@@ -1401,6 +1447,9 @@ function normalizeAds(){
     var text = String(a.text || "").trim();
     return img.length > 0 || text.length > 0;
   });
+  if(!settings.ads.length && typeof DEFAULT_ADS !== "undefined"){
+    settings.ads = DEFAULT_ADS.slice();
+  }
 }
 
 function buildAdSlideEl(ad){
@@ -2175,6 +2224,8 @@ function setPublicView(view){
   });
 }
 document.getElementById("navFiles").onclick = function(){ setPublicView("files"); };
+document.getElementById("ctaFiles").onclick = function(){ setPublicView("files"); document.getElementById("viewFiles").scrollIntoView({behavior:"smooth",block:"start"}); };
+
 document.getElementById("navReport").onclick = function(){ setPublicView("report"); };
 document.getElementById("navRules").onclick = function(){ setPublicView("rules"); };
 
@@ -2322,12 +2373,20 @@ if(FIREBASE_CONFIG){
   if(initFirebase(FIREBASE_CONFIG)){
     bindCloudListeners();
     startPresence();
+    normalizeAds();
+    renderAdCarousel();
+    setTimeout(function(){ normalizeAds(); renderAdCarousel(); }, 500);
+    setTimeout(function(){ normalizeAds(); renderAdCarousel(); }, 1500);
   }
 } else {
   updateCloudBanner();
+  normalizeAds();
   renderEntries();
   renderPublicExtras();
+  renderAdCarousel();
 }
+normalizeAds();
+renderAdCarousel();
 bumpVisit();
 if(!cloudReady){
   renderEntries();
