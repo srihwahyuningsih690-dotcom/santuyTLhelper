@@ -561,11 +561,11 @@
   .ad-track{display:flex;transition:transform .45s ease;will-change:transform;}
   .ad-slide{min-width:100%;flex:0 0 100%;}
   .ad-slide a{display:block;text-decoration:none;color:inherit;}
-  .ad-slide img,.ad-slide video{
+  .ad-slide img{
     width:100%;height:110px;object-fit:contain;display:block;background:#062028;
   }
   @media(min-width:600px){
-    .ad-slide img,.ad-slide video{height:160px;}
+    .ad-slide img{height:160px;}
   }
   .ad-slide .ad-cap{
     padding:8px 12px;font-size:12px;color:var(--ink-dim);line-height:1.4;
@@ -895,7 +895,7 @@
     <div class="card">
       <h2>Iklan carousel (atas)</h2>
       <p style="font-size:13px;color:var(--ink-dim);line-height:1.55;margin:0 0 12px;">
-        Bisa banyak iklan, geser otomatis ke kiri. Upload gambar dari HP/PC, atau URL gambar/video (mp4). Video disarankan pakai URL (file video terlalu besar untuk diupload).
+        Bisa banyak iklan, geser otomatis ke kiri. Upload gambar dari HP/PC, atau masukkan URL gambar.
       </p>
       <div id="adAdminList"></div>
       <div class="field">
@@ -903,8 +903,8 @@
         <input type="file" id="adFileInput" accept="image/*">
       </div>
       <div class="field">
-        <label>Atau URL gambar / video (mp4)</label>
-        <input type="url" id="adNewImg" placeholder="https://.../banner.jpg atau video.mp4">
+        <label>Atau URL gambar</label>
+        <input type="url" id="adNewImg" placeholder="https://.../banner.jpg">
       </div>
       <div class="field">
         <label>Link klik (opsional)</label>
@@ -916,6 +916,7 @@
       </div>
       <button class="btn-secondary" type="button" id="adAddBtn">+ Tambah iklan</button>
       <div class="status" id="adAdminStatus"></div>
+      <div class="status" id="adDebugStatus" style="margin-top:8px;font-family:monospace;font-size:11px;word-break:break-word;"></div>
     </div>
     <div class="card">
       <h2>ShrinkMe (penghasilan)</h2>
@@ -1029,6 +1030,7 @@ var adTimer = null;
 var commentsByEntry = {};
 var visitCount = 0;
 var cloudReady = false;
+var cloudAdsLoaded = false;
 var db = null;
 var ADMIN_PASSWORD = "santuy123";
 var USER_DESC = "Kumpulan file resmi dari SantuyTL Team. Pilih file, lalu unduh lewat link utama atau cadangan jika link pertama tidak tersedia.";
@@ -1134,7 +1136,7 @@ function loadLocalFallback(){
       var p = JSON.parse(s);
       settings = { credit: p.credit || settings.credit, rules: p.rules || "", youtube: p.youtube || "", discord: p.discord || "", ads: coerceAdsList(p.ads) };
     if(!settings.ads.length && (p.adImg || "")) settings.ads = [{ img: p.adImg || "", link: p.adLink || "", text: p.adText || "" }];
-    normalizeAds();
+    normalizeAds(true);
     }
     visitCount = v ? (parseInt(v, 10) || 0) : 0;
   }catch(err){
@@ -1153,13 +1155,14 @@ function saveLocalFallback(){
 }
 
 function persistAll(){
-  normalizeAds();
+  normalizeAds(false);
   if(cloudReady && db){
     var settingsToSave = {
       credit: settings.credit || "",
       rules: settings.rules || "",
       youtube: settings.youtube || "",
-      discord: settings.discord || ""
+      discord: settings.discord || "",
+      ads: settings.ads || []
     };
     return db.ref(ROOT).update({
       entries: entries,
@@ -1168,7 +1171,7 @@ function persistAll(){
       ads: settings.ads || [],
       visits: visitCount
     }).then(function(){ return true; }).catch(function(err){
-      console.error(err);
+      console.error("Firebase persistAll:", err);
       saveLocalFallback();
       return false;
     });
@@ -1177,56 +1180,75 @@ function persistAll(){
 }
 
 function persistAdsOnly(){
-  normalizeAds();
-  if(cloudReady && db){
-    return db.ref(ROOT + "/ads").set(settings.ads || []).then(function(){ return true; }).catch(function(err){
-      console.error(err);
-      return false;
-    });
+  normalizeAds(false);
+  var ads = settings.ads || [];
+  saveLocalFallback();
+  var dbg = document.getElementById("adDebugStatus");
+  function debug(msg){ if(dbg) dbg.textContent = msg; console.log("[IKLAN]", msg); }
+  if(!(cloudReady && db)){
+    debug("Cloud OFF — iklan disimpan lokal di browser ini saja.");
+    return Promise.resolve(true);
   }
-  return Promise.resolve(saveLocalFallback());
+  debug("Mengirim iklan ke Firebase /" + ROOT + "/ads ...");
+  return db.ref(ROOT + "/ads").set(ads).then(function(){
+    debug("Write Firebase berhasil. Memeriksa data...");
+    return db.ref(ROOT + "/ads").once("value");
+  }).then(function(snap){
+    var saved = coerceAdsList(snap.val());
+    if(JSON.stringify(saved) !== JSON.stringify(ads)){
+      debug("GAGAL VERIFIKASI: data Firebase berbeda dari iklan yang dikirim.");
+      console.error("Ads verification failed", saved, ads);
+      return false;
+    }
+    settings.ads = saved;
+    cloudAdsLoaded = true;
+    // Mirror to settings/ads only after canonical /ads is confirmed.
+    return db.ref(ROOT + "/settings/ads").set(saved).then(function(){
+      debug("OK — iklan tersimpan di Firebase dan sudah diverifikasi.");
+      return true;
+    });
+  }).catch(function(err){
+    var code = err && err.code ? err.code : "UNKNOWN";
+    var msg = err && err.message ? err.message : String(err);
+    debug("FIREBASE ERROR: " + code + " — " + msg);
+    console.error("Firebase persistAdsOnly:", err);
+    saveLocalFallback();
+    return false;
+  });
 }
 
 function bindCloudListeners(){
   if(!cloudReady || !db) return;
   db.ref(ROOT + "/ads").on("value", function(snap){
-    var loaded = coerceAdsList(snap.val());
-    if(loaded.length) settings.ads = loaded;
-    normalizeAds();
+    var raw = snap.val();
+    settings.ads = (raw === null || raw === undefined) ? [] : coerceAdsList(raw);
+    cloudAdsLoaded = true;
+    normalizeAds(false);
+    renderAdAdminList();
     renderAdCarousel();
   });
+  db.ref(ROOT + "/ads").on("child_changed", function(){ renderAdCarousel(); });
+  db.ref(ROOT + "/ads").on("child_added", function(){ renderAdCarousel(); });
+  db.ref(ROOT + "/ads").on("child_removed", function(){ renderAdCarousel(); });
+
+  // ROOT listener only handles non-ad data.
   db.ref(ROOT).on("value", function(snap){
     var val = snap.val() || {};
     entries = mapToArray(val.entries);
     logs = mapToArray(val.logs);
     if(val.settings){
-      settings = {
-        credit: val.settings.credit || settings.credit,
-        rules: val.settings.rules || "",
-        youtube: val.settings.youtube || "",
-        discord: val.settings.discord || "",
-        ads: settings.ads || []
-      };
+      settings.credit = val.settings.credit || settings.credit;
+      settings.rules = val.settings.rules || "";
+      settings.youtube = val.settings.youtube || "";
+      settings.discord = val.settings.discord || "";
     }
-    // ALWAYS load ads (separate path) — jangan tergantung settings
-    if(val.ads != null){
-      var loaded = coerceAdsList(val.ads);
-      if(loaded.length) settings.ads = loaded;
-    } else if(val.settings && val.settings.ads){
-      var loaded2 = coerceAdsList(val.settings.ads);
-      if(loaded2.length) settings.ads = loaded2;
-    }
-    normalizeAds();
     if(typeof val.visits === "number") visitCount = val.visits;
     if(val.comments) commentsByEntry = val.comments;
-    else if(!val.comments) commentsByEntry = commentsByEntry || {};
     if(val.reports){
-      var rr = val.reports;
-      window._reportsCache = Array.isArray(rr) ? rr : Object.keys(rr).map(function(k){ var x=rr[k]||{}; x.id=k; return x; });
+      var rr=val.reports;
+      window._reportsCache=Array.isArray(rr)?rr:Object.keys(rr).map(function(k){var x=rr[k]||{};x.id=k;return x;});
     }
-    entries.forEach(function(item){
-      if(typeof item.downloads !== "number") item.downloads = 0;
-    });
+    entries.forEach(function(item){ if(typeof item.downloads !== "number") item.downloads=0; });
     renderEntries();
     renderPublicExtras();
     if(isAdmin) renderStats();
@@ -1440,14 +1462,16 @@ function coerceAdsList(raw){
   }
   return [];
 }
-function normalizeAds(){
+function normalizeAds(useDefaults){
   settings.ads = coerceAdsList(settings.ads).filter(function(a){
     if(!a || typeof a !== "object") return false;
     var img = String(a.img || "").trim();
     var text = String(a.text || "").trim();
     return img.length > 0 || text.length > 0;
   });
-  if(!settings.ads.length && typeof DEFAULT_ADS !== "undefined"){
+  // Defaults are ONLY for the initial offline/local state.
+  // Never reinsert defaults after Firebase has supplied the real list.
+  if(useDefaults !== false && !cloudAdsLoaded && !settings.ads.length && typeof DEFAULT_ADS !== "undefined"){
     settings.ads = DEFAULT_ADS.slice();
   }
 }
@@ -1455,29 +1479,82 @@ function normalizeAds(){
 function buildAdSlideEl(ad){
   var slide = document.createElement("div");
   slide.className = "ad-slide";
-  var src = (ad.img || "").trim();
-  var text = (ad.text || "").trim();
-  var media = "";
-  var isVid = ad.type === "video" || /\.(mp4|webm|ogg)(\?|$)/i.test(src) || (src.indexOf("data:video/") === 0);
-  var isImg = src && (src.indexOf("data:image/") === 0 || /^https?:\/\//i.test(src)) && !isVid;
-  if(isVid){
-    media = '<video src="' + escapeAttr(src) + '" muted autoplay loop playsinline></video>';
-  } else if(isImg){
-    media = '<img src="' + escapeAttr(src) + '" alt="Iklan" loading="lazy">';
+  var src = String(ad && ad.img || "").trim();
+  var text = String(ad && ad.text || "").trim();
+  var link = String(ad && ad.link || "").trim();
+
+  var mediaBox = document.createElement("div");
+  mediaBox.style.minHeight = "92px";
+  mediaBox.style.background = "#062028";
+
+  if(src && (src.indexOf("data:image/") === 0 || /^https?:\/\//i.test(src))){
+    var img = document.createElement("img");
+    img.alt = "Iklan";
+    img.loading = "eager";
+    img.decoding = "async";
+    img.src = src;
+    img.style.width = "100%";
+    img.style.height = "110px";
+    img.style.objectFit = "contain";
+    img.style.display = "block";
+    img.style.background = "#062028";
+
+    var err = document.createElement("div");
+    err.textContent = "Iklan tidak bisa dimuat dari sumber gambar";
+    err.style.display = "none";
+    err.style.minHeight = "92px";
+    err.style.alignItems = "center";
+    err.style.justifyContent = "center";
+    err.style.padding = "16px";
+    err.style.color = "#e6fffb";
+    err.style.background = "#0a3038";
+    err.style.textAlign = "center";
+
+    img.onerror = function(){
+      img.style.display = "none";
+      err.style.display = "flex";
+    };
+    mediaBox.appendChild(img);
+    mediaBox.appendChild(err);
   } else {
-    media = '<div class="ad-fallback" style="display:flex;min-height:88px;align-items:center;justify-content:center;padding:14px 16px;color:#e6fffb;font-size:15px;background:linear-gradient(135deg,#0f766e,#0a3038);text-align:center;font-weight:500;">' + escapeHtml(text || "Iklan SantuyTL") + '</div>';
+    var fallback = document.createElement("div");
+    fallback.textContent = text || "Iklan SantuyTL";
+    fallback.style.display = "flex";
+    fallback.style.minHeight = "88px";
+    fallback.style.alignItems = "center";
+    fallback.style.justifyContent = "center";
+    fallback.style.padding = "14px 16px";
+    fallback.style.color = "#e6fffb";
+    fallback.style.background = "linear-gradient(135deg,#0f766e,#0a3038)";
+    fallback.style.textAlign = "center";
+    fallback.style.fontWeight = "500";
+    mediaBox.appendChild(fallback);
   }
-  var body = "";
-  if(ad.link) body += '<a href="' + escapeAttr(ad.link) + '" target="_blank" rel="noopener">';
-  body += media;
-  if(text && isImg) body += '<div class="ad-cap"><b>Iklan</b> · ' + escapeHtml(text) + '</div>';
-  if(ad.link) body += '</a>';
-  slide.innerHTML = body;
+
+  var content = document.createElement("div");
+  content.appendChild(mediaBox);
+  if(text && src){
+    var cap = document.createElement("div");
+    cap.className = "ad-cap";
+    cap.innerHTML = "<b>Iklan</b> · " + escapeHtml(text);
+    content.appendChild(cap);
+  }
+
+  if(link){
+    var a = document.createElement("a");
+    a.href = link;
+    a.target = "_blank";
+    a.rel = "noopener";
+    a.appendChild(content);
+    slide.appendChild(a);
+  } else {
+    slide.appendChild(content);
+  }
   return slide;
 }
 function renderAdCarousel(){
   try{
-  normalizeAds();
+  normalizeAds(false);
   if(adTimer){ clearInterval(adTimer); adTimer = null; }
   var ads = settings.ads || [];
   var pairs = [
@@ -1514,6 +1591,32 @@ function renderAdCarousel(){
   }
   }catch(err){ console.error("ad carousel", err); }
 }
+function reloadAdsFromCloud(){
+  var dbg = document.getElementById("adDebugStatus");
+  function debug(msg){ if(dbg) dbg.textContent = msg; console.log("[IKLAN]", msg); }
+  if(!cloudReady || !db){
+    debug("Cloud OFF — tidak bisa membaca iklan Firebase.");
+    renderAdCarousel();
+    return Promise.resolve(false);
+  }
+  debug("Membaca Firebase /" + ROOT + "/ads ...");
+  return db.ref(ROOT + "/ads").once("value").then(function(snap){
+    settings.ads = coerceAdsList(snap.val());
+    cloudAdsLoaded = true;
+    normalizeAds(false);
+    renderAdAdminList();
+    renderAdCarousel();
+    debug("READ OK — " + settings.ads.length + " iklan ditemukan di Firebase.");
+    return true;
+  }).catch(function(err){
+    var code = err && err.code ? err.code : "UNKNOWN";
+    var msg = err && err.message ? err.message : String(err);
+    debug("FIREBASE READ ERROR: " + code + " — " + msg);
+    console.error("reloadAdsFromCloud:", err);
+    return false;
+  });
+}
+
 function goAdSlide(i){
   if(!settings.ads || !settings.ads.length) return;
   adSlideIndex = i;
@@ -1531,44 +1634,60 @@ function goAdSlide(i){
 }
 
 function renderAdAdminList(){
-  normalizeAds();
+  normalizeAds(false);
   var box = document.getElementById("adAdminList");
   if(!box) return;
+  box.innerHTML = "";
   if(!settings.ads.length){
     box.innerHTML = '<p class="empty">Belum ada iklan.</p>';
     return;
   }
-  box.innerHTML = "";
   settings.ads.forEach(function(ad, i){
     var item = document.createElement("div");
     item.className = "ad-admin-item";
-    item.innerHTML =
-      '<img src="' + escapeAttr(ad.img) + '" alt="">' +
-      '<p style="margin:0;font-size:12.5px;color:var(--ink-dim);">' + escapeHtml(ad.text || "(tanpa teks)") + '</p>' +
-      '<p style="margin:4px 0 0;font-size:11px;color:var(--ink-dim);word-break:break-all;">' + escapeHtml(ad.link || "") + '</p>' +
-      '<div class="ad-admin-actions">' +
-      '<button type="button" class="btn-secondary ad-up">Naik</button>' +
-      '<button type="button" class="btn-secondary ad-down">Turun</button>' +
-      '<button type="button" class="del-btn ad-del">Hapus</button>' +
-      '</div>';
-    item.querySelector(".ad-del").onclick = function(){
+
+    if(ad.img){
+      var preview = document.createElement("img");
+      preview.alt = "";
+      preview.src = ad.img;
+      preview.loading = "lazy";
+      item.appendChild(preview);
+    }
+    var p1 = document.createElement("p");
+    p1.style.cssText = "margin:0;font-size:12.5px;color:var(--ink-dim);";
+    p1.textContent = ad.text || "(tanpa teks)";
+    item.appendChild(p1);
+    var p2 = document.createElement("p");
+    p2.style.cssText = "margin:4px 0 0;font-size:11px;color:var(--ink-dim);word-break:break-all;";
+    p2.textContent = ad.link || "";
+    item.appendChild(p2);
+
+    var actions = document.createElement("div");
+    actions.className = "ad-admin-actions";
+    function makeBtn(label, cls){ var b=document.createElement("button"); b.type="button"; b.className=cls; b.textContent=label; return b; }
+    var up = makeBtn("Naik", "btn-secondary ad-up");
+    var down = makeBtn("Turun", "btn-secondary ad-down");
+    var del = makeBtn("Hapus", "del-btn ad-del");
+    actions.appendChild(up); actions.appendChild(down); actions.appendChild(del);
+    item.appendChild(actions);
+
+    del.onclick = function(){
       settings.ads.splice(i, 1);
       persistAdsOnly().then(function(){ renderAdAdminList(); renderAdCarousel(); showToast("Iklan dihapus.", "success"); });
     };
-    item.querySelector(".ad-up").onclick = function(){
+    up.onclick = function(){
       if(i === 0) return;
-      var t = settings.ads[i-1]; settings.ads[i-1] = settings.ads[i]; settings.ads[i] = t;
+      var t=settings.ads[i-1]; settings.ads[i-1]=settings.ads[i]; settings.ads[i]=t;
       persistAdsOnly().then(function(){ renderAdAdminList(); renderAdCarousel(); });
     };
-    item.querySelector(".ad-down").onclick = function(){
-      if(i >= settings.ads.length - 1) return;
-      var t = settings.ads[i+1]; settings.ads[i+1] = settings.ads[i]; settings.ads[i] = t;
+    down.onclick = function(){
+      if(i >= settings.ads.length-1) return;
+      var t=settings.ads[i+1]; settings.ads[i+1]=settings.ads[i]; settings.ads[i]=t;
       persistAdsOnly().then(function(){ renderAdAdminList(); renderAdCarousel(); });
     };
     box.appendChild(item);
   });
 }
-
 function compressImageFile(file, maxW, quality){
   return new Promise(function(resolve, reject){
     if(!file || !file.type || file.type.indexOf("image/") !== 0){
@@ -1606,11 +1725,11 @@ function compressImageFile(file, maxW, quality){
 function isValidAdMedia(src){
   src = String(src || "").trim();
   if(!src) return false;
-  if(src.indexOf("data:image/") === 0 || src.indexOf("data:video/") === 0) return true;
+  if(src.indexOf("data:image/") === 0) return true;
   if(/^https?:\/\//i.test(src)) return true;
   return false;
 }
-function addAdFromForm(imgData, mediaType){
+function addAdFromForm(imgData){
   var link = (document.getElementById("adNewLink").value || "").trim();
   var text = (document.getElementById("adNewText").value || "").trim();
   imgData = (imgData || "").trim();
@@ -1618,39 +1737,41 @@ function addAdFromForm(imgData, mediaType){
     showToast("Isi gambar/URL atau teks iklan.", "error");
     return;
   }
+  if(imgData && !isValidAdMedia(imgData)){
+    showToast("URL iklan harus berupa URL gambar yang valid.", "error");
+    return;
+  }
   if(!settings.ads) settings.ads = [];
-  var type = "text";
-  if(imgData){
-    if(mediaType === "video" || /\.(mp4|webm|ogg)(\?|$)/i.test(imgData) || imgData.indexOf("data:video/") === 0) type = "video";
-    else if(isValidAdMedia(imgData)) type = "image";
-    else type = "text"; // free text treated as caption if not URL
-  }
-  // if free text was put in img field but not a URL, move to text
-  if(imgData && type === "text" && !isValidAdMedia(imgData)){
-    if(!text) text = imgData;
-    imgData = "";
-  }
-  settings.ads.push({ img: imgData, link: link, text: text, type: type });
+  var ad = { img: imgData, link: link, text: text, type: "image" };
+  settings.ads.push(ad);
+  normalizeAds(false);
+  renderAdAdminList();
+  renderAdCarousel();
+
   var st = document.getElementById("adAdminStatus");
   if(st) st.textContent = "Menyimpan iklan...";
+  var dbg = document.getElementById("adDebugStatus");
+  if(dbg) dbg.textContent = "Iklan tampil lokal. Menunggu hasil penyimpanan...";
   var saveFn = (cloudReady && db) ? persistAdsOnly : persistAll;
   saveFn().then(function(ok){
-    if(st) st.textContent = ok ? "Iklan ditambahkan. Cek halaman publik." : "Gagal simpan iklan.";
+    if(st) st.textContent = ok ? "Iklan tersimpan dan ditampilkan." : "Gagal simpan iklan — iklan tetap tampil sementara di halaman ini.";
+    if(dbg && ok) dbg.textContent = "OK — iklan tersimpan ke cloud.";
+    if(dbg && !ok) dbg.textContent = "GAGAL — cek pesan Firebase di baris status ini.";
     if(ok){
       document.getElementById("adNewImg").value = "";
       document.getElementById("adNewLink").value = "";
       document.getElementById("adNewText").value = "";
       document.getElementById("adFileInput").value = "";
+      saveLocalFallback();
       renderAdAdminList();
       renderAdCarousel();
       showToast("Iklan ditambahkan.", "success");
     } else {
-      settings.ads.pop();
-      showToast("Gagal simpan iklan.", "error");
+      saveLocalFallback();
+      showToast("Iklan tampil, tapi gagal disimpan ke cloud.", "error");
     }
   });
 }
-
 function renderReports(){
   var box = document.getElementById("reportListAdmin");
   if(!box) return;
@@ -2373,10 +2494,22 @@ if(FIREBASE_CONFIG){
   if(initFirebase(FIREBASE_CONFIG)){
     bindCloudListeners();
     startPresence();
-    normalizeAds();
+    db.ref(ROOT + "/ads").once("value").then(function(snap){
+      cloudAdsLoaded = true;
+      settings.ads = coerceAdsList(snap.val());
+      normalizeAds(false);
+      renderAdAdminList();
+      renderAdCarousel();
+      console.log("[IKLAN] boot READ OK", settings.ads);
+    }).catch(function(err){
+      console.error("[IKLAN] boot READ ERROR", err);
+      var dbg = document.getElementById("adDebugStatus");
+      if(dbg) dbg.textContent = "FIREBASE READ ERROR: " + (err.code || "UNKNOWN") + " — " + (err.message || err);
+    });
+    normalizeAds(true);
     renderAdCarousel();
-    setTimeout(function(){ normalizeAds(); renderAdCarousel(); }, 500);
-    setTimeout(function(){ normalizeAds(); renderAdCarousel(); }, 1500);
+    setTimeout(function(){ if(!cloudAdsLoaded) renderAdCarousel(); }, 500);
+    setTimeout(function(){ if(!cloudAdsLoaded) renderAdCarousel(); }, 1500);
   }
 } else {
   updateCloudBanner();
@@ -2385,7 +2518,7 @@ if(FIREBASE_CONFIG){
   renderPublicExtras();
   renderAdCarousel();
 }
-normalizeAds();
+normalizeAds(false);
 renderAdCarousel();
 bumpVisit();
 if(!cloudReady){
